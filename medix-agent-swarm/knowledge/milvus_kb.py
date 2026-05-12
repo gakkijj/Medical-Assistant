@@ -6,7 +6,6 @@
 2. 语义检索
 3. 知识库管理
 
-参考实现：/Users/saintgeo/Desktop/self-learn/shanglv
 """
 import json
 from pathlib import Path
@@ -21,6 +20,7 @@ class MedicalKnowledgeBase:
     """医学知识库"""
 
     _instance = None
+    _project_root = Path(__file__).resolve().parents[1]
 
     def __new__(cls, *args, **kwargs):
         """实现单例模式"""
@@ -30,7 +30,7 @@ class MedicalKnowledgeBase:
 
     def __init__(
         self,
-        db_path: str = "./knowledge/data/milvus_lite.db",
+        db_path: Optional[str] = None,
         collection_name: str = "medical_knowledge",
         embedding_model: str = "BAAI/bge-small-zh-v1.5"
     ):
@@ -45,6 +45,9 @@ class MedicalKnowledgeBase:
         # 防止重复初始化
         if hasattr(self, '_initialized'):
             return
+
+        if db_path is None:
+            db_path = str(self._project_root / "knowledge" / "data" / "milvus_lite.db")
 
         self.db_path = db_path
         self.collection_name = collection_name

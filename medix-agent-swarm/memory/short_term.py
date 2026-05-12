@@ -151,6 +151,9 @@ class ShortTermMemory:
         Returns:
             ConversationHistory 对象
         """
+        if not session_id:
+            raise ValueError("session_id is required to create a short-term memory session")
+
         history = ConversationHistory(
             session_id=session_id,
             metadata=metadata or {}
@@ -178,6 +181,9 @@ class ShortTermMemory:
             role: 消息角色（user/assistant/tool）
             content: 消息内容
         """
+        if not session_id:
+            raise ValueError("session_id is required to add a short-term memory message")
+
         history = self.get_session(session_id)
 
         if history is None:
@@ -201,6 +207,9 @@ class ShortTermMemory:
         Returns:
             ConversationHistory 对象，如果不存在返回 None
         """
+        if not session_id:
+            return None
+
         if self.storage_type == "memory":
             return self.sessions.get(session_id)
         elif self.storage_type == "redis" and self.redis_client:
@@ -222,6 +231,9 @@ class ShortTermMemory:
         Returns:
             消息列表（去重和压缩后）
         """
+        if not session_id:
+            return []
+
         history = self.get_session(session_id)
         if history:
             messages = history.get_recent_messages(limit)
@@ -264,6 +276,9 @@ class ShortTermMemory:
         Returns:
             消息列表（OpenAI 格式: [{"role": "user", "content": "..."}, ...]）
         """
+        if not session_id:
+            return []
+
         # get_recent_messages 已处理熵管理，这里只做格式转换
         messages = self.get_recent_messages(session_id, limit * 2)  # 每轮2条消息
 
@@ -283,6 +298,9 @@ class ShortTermMemory:
         Args:
             session_id: 会话ID
         """
+        if not session_id:
+            raise ValueError("session_id is required to clear a short-term memory session")
+
         if self.storage_type == "memory":
             self.sessions.pop(session_id, None)
         elif self.storage_type == "redis" and self.redis_client:

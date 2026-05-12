@@ -6,7 +6,7 @@ from typing import Dict, Any
 from loguru import logger
 
 
-async def search_similar_cases(query: str, max_results: int = 3) -> Dict[str, Any]:
+async def search_similar_cases(query: str, max_results: int = 3, session_id: str = "") -> Dict[str, Any]:
     """
     搜索相似的历史案例
 
@@ -38,7 +38,7 @@ async def search_similar_cases(query: str, max_results: int = 3) -> Dict[str, An
             }
 
         # 搜索相似会话
-        results = memory.search_similar_sessions(query=query, limit=max_results)
+        results = memory.search_similar_sessions(query=query, limit=max_results, user_id=session_id)
 
         if not results:
             return {

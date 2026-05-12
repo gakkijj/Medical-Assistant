@@ -157,5 +157,7 @@ class BaseAgent(ABC):
             'subtask_id': subtask.id,
             'subtask_type': subtask.type
         }
+        if self.shared_context and getattr(self.shared_context, "session_id", None):
+            input_data['session_id'] = self.shared_context.session_id
 
         return await self.run_loop(input_data)

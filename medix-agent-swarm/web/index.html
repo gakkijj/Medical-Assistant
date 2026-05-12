@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>医疗多 Agent 智能助手</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>医疗多 Agent 智能助手</h1>
+          <p>知识库、记忆与多 Agent 协作驱动的健康问答</p>
+        </div>
+        <div class="top-actions">
+          <div class="status-pill" id="sessionBadge">会话初始化中</div>
+          <button class="secondary-button" type="button" id="newSessionButton">新会话</button>
+        </div>
+      </header>
+
+      <section class="chat-panel" aria-live="polite">
+        <div class="messages" id="messages"></div>
+      </section>
+
+      <form class="composer" id="chatForm">
+        <textarea
+          id="messageInput"
+          rows="2"
+          placeholder="请输入您的健康问题，例如：我最近头痛发烧怎么办？"
+          autocomplete="off"
+        ></textarea>
+        <button type="submit" id="sendButton">发送</button>
+      </form>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

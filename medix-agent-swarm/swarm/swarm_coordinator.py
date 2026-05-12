@@ -115,7 +115,8 @@ class SwarmCoordinator:
         # 2. 检索长期记忆（相似历史会话）
         similar_memories = self.long_term_memory.search_similar_sessions(
             query=question,
-            limit=3
+            limit=3,
+            user_id=session_id
         )
 
         # 3. 构建增强上下文
@@ -235,7 +236,8 @@ class SwarmCoordinator:
                     "mode": mode,
                     "subtasks_count": len(subtasks),
                     "total_time": (end_time - start_time).total_seconds(),
-                }
+                },
+                user_id=session_id
             )
             logger.info(f"Saved to long-term memory (session={session_id}, mode={mode})")
         except Exception as e:
@@ -349,7 +351,8 @@ class SwarmCoordinator:
                     "agents_count": len(shared_context.agent_contributions),
                     "total_time": (end_time - start_time).total_seconds(),
                     "timeout_occurred": timeout_occurred
-                }
+                },
+                user_id=session_id
             )
 
             logger.info(f"Saved to Mem0 long-term memory (session={session_id})")

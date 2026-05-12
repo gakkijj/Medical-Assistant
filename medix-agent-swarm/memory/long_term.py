@@ -13,6 +13,7 @@ Mem0 优势：
 """
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+from pathlib import Path
 from loguru import logger
 import os
 import sys
@@ -25,8 +26,11 @@ except ImportError:
     logger.warning("EntropyManager not found, running without entropy management")
     ENTROPY_ENABLED = False
 
-# 加载上层目录的config.py
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# 加载工作区根目录的 config.py
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = PROJECT_ROOT.parent
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
 try:
     from config import MEM0_CONFIG
 except ImportError:
@@ -87,7 +91,7 @@ class LongTermMemory:
                 mem0_api_key = os.getenv("MEM0_API_KEY")
 
             if not mem0_api_key:
-                raise ValueError("MEM0_API_KEY not found. Set it in /Users/saintgeo/Desktop/self-learn/swarm/config.py")
+                raise ValueError("MEM0_API_KEY not found. Set it in environment variables or config.py")
 
             # 初始化 Mem0 云服务客户端
             self.mem0 = MemoryClient(api_key=mem0_api_key)
@@ -96,7 +100,7 @@ class LongTermMemory:
         except Exception as e:
             logger.warning(f"Failed to initialize Mem0: {e}")
             logger.warning("Long-term memory disabled. System will work without Mem0.")
-            logger.info("To enable Mem0: set MEM0_API_KEY in /Users/saintgeo/Desktop/self-learn/swarm/config.py")
+            logger.info("To enable Mem0: set MEM0_API_KEY in environment variables or config.py")
             self.enabled = False
 
     def add_session_summary(
@@ -104,7 +108,8 @@ class LongTermMemory:
         session_id: str,
         question: str,
         answer: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None
     ) -> Optional[str]:
         """
         添加会话总结到 Mem0
@@ -121,6 +126,11 @@ class LongTermMemory:
         if not self.enabled:
             return None
 
+        memory_user_id = user_id or session_id
+        if not memory_user_id:
+            logger.warning("Skip long-term memory write: missing session_id/user_id")
+            return None
+
         try:
             # 构建记忆文本（包含问题和答案摘要）
             memory_text = f"问题：{question}\\n回答：{answer[:500]}..."
@@ -128,10 +138,11 @@ class LongTermMemory:
             # 添加到 Mem0
             result = self.mem0.add(
                 messages=[{"role": "user", "content": memory_text}],
-                user_id="medix_user",  # 固定用户ID（可扩展为多用户）
+                user_id=memory_user_id,
                 metadata={
                     "type": "session_summary",
                     "session_id": session_id,
+                    "user_id": memory_user_id,
                     "timestamp": datetime.now().isoformat(),
                     **(metadata or {})
                 }
@@ -153,7 +164,8 @@ class LongTermMemory:
     def search_similar_sessions(
         self,
         query: str,
-        limit: int = 5
+        limit: int = 5,
+        user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         搜索相似的历史会话（向量相似度搜索，自动去重）
@@ -168,10 +180,14 @@ class LongTermMemory:
         if not self.enabled:
             return []
 
+        if not user_id:
+            logger.warning("Skip long-term memory search: missing user_id")
+            return []
+
         try:
             results = self.mem0.search(
                 query=query,
-                user_id="medix_user",
+                user_id=user_id,
                 limit=limit * 2  # 多获取一些以便去重后有足够结果
             )
 
@@ -214,6 +230,4 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to search similar sessions: {e}")
             return []
-
-
 

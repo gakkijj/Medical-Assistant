@@ -1,0 +1,6 @@
+# Local environment variables
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]

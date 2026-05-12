@@ -6,11 +6,13 @@ LLM客户端
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from openai import AsyncOpenAI
 from loguru import logger
+from .request_metrics import record_llm_call
 
 # 支持从子项目目录运行，同时读取工作区根目录的 config.py。
 project_root = Path(__file__).resolve().parents[1]
@@ -92,13 +94,17 @@ class LLMClient:
 
             logger.debug(f"Calling LLM ({self.model_type}) with {len(messages)} messages")
 
-            response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs
-            )
+            start = time.perf_counter()
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs
+                )
+            finally:
+                record_llm_call(time.perf_counter() - start)
 
             content = response.choices[0].message.content
             logger.debug(f"LLM response length: {len(content)} chars")
@@ -189,7 +195,11 @@ class LLMClient:
                 if tool_choice != "auto":
                     request_params["tool_choice"] = tool_choice
 
-            response = await self.client.chat.completions.create(**request_params)
+            start = time.perf_counter()
+            try:
+                response = await self.client.chat.completions.create(**request_params)
+            finally:
+                record_llm_call(time.perf_counter() - start)
 
             # 解析响应
             message = response.choices[0].message
