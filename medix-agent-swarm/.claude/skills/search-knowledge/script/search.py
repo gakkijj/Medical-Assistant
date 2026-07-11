@@ -53,7 +53,9 @@ async def search_knowledge(query: str, max_results: int = 5) -> Dict[str, Any]:
             "content": doc["content"],
             "source": doc["metadata"].get("source", "医学知识库"),
             "score": doc["score"],
-            "type": doc["metadata"].get("type")
+            "type": doc["metadata"].get("type"),
+            "doc_id": doc["metadata"].get("doc_id"),
+            "filename": doc["metadata"].get("filename"),
         })
 
     # Skill 的格式化输出
@@ -61,7 +63,18 @@ async def search_knowledge(query: str, max_results: int = 5) -> Dict[str, Any]:
         return {
             "answer": format_results(formatted_results),
             "total_found": len(formatted_results),
-            "query": query
+            "query": query,
+            "citations": [
+                {
+                    "index": index,
+                    "title": item["title"],
+                    "source": item["source"],
+                    "score": round(float(item["score"]), 4),
+                    "doc_id": item.get("doc_id"),
+                    "filename": item.get("filename"),
+                }
+                for index, item in enumerate(formatted_results, 1)
+            ],
         }
     else:
         return {
@@ -86,8 +99,9 @@ def format_results(results: list) -> str:
 
     output = []
     for i, doc in enumerate(results, 1):
-        output.append(f"【结果 {i}】")
+        output.append(f"【资料 {i}】{doc.get('title', '医学知识')}")
         output.append(doc.get("content", "无内容"))
+        output.append(f"来源: {doc.get('source', '医学知识库')}")
 
         # 显示相关度分数（如果有）
         score = doc.get("score", 0)

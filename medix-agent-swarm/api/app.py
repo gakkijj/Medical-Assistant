@@ -1,5 +1,6 @@
 """FastAPI application for the MediX multi-agent assistant."""
 import asyncio
+import os
 from pathlib import Path
 import sys
 import time
@@ -31,12 +32,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "MEDIX_CORS_ORIGINS",
+        "http://localhost:8000,http://127.0.0.1:8000",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 WEB_DIR = PROJECT_ROOT / "web"
@@ -84,8 +94,7 @@ def _adapt_chat_result(
     fallback_session_id: str,
     elapsed: float,
     timings: dict[str, float],
-    llm_total_time: float,
-    llm_call_count: int,
+    metrics: dict[str, Any],
 ) -> ChatResponse:
     """Normalize the existing swarm result without changing core logic."""
     agents_involved = _as_string_list(result.get("agents_involved"))
@@ -105,8 +114,15 @@ def _adapt_chat_result(
         swarm_enabled=bool(result.get("swarm_enabled", False)),
         total_time=float(total_time) if total_time is not None else None,
         total_elapsed_time=round(elapsed, 4),
-        llm_total_time=round(llm_total_time, 4),
-        llm_call_count=llm_call_count,
+        llm_total_time=round(float(metrics.get("llm_total_time", 0.0)), 4),
+        llm_call_count=int(metrics.get("llm_call_count", 0)),
+        prompt_tokens=int(metrics.get("prompt_tokens", 0)),
+        completion_tokens=int(metrics.get("completion_tokens", 0)),
+        total_tokens=int(metrics.get("total_tokens", 0)),
+        tool_call_count=int(metrics.get("tool_call_count", 0)),
+        route=result.get("route") or metrics.get("route"),
+        citations=result.get("citations") or [],
+        trace=metrics.get("events") or [],
         timings=timings,
         raw=result,
     )
@@ -138,7 +154,7 @@ async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid4())
     start = time.perf_counter()
     metrics_token = start_request_metrics()
-    logger.info(f"chat request session={session_id[:8]} message={message[:50]}")
+    logger.info(f"chat request session={session_id[:8]} message_length={len(message)}")
 
     try:
         coordinator, init_time = await _get_coordinator()
@@ -147,16 +163,19 @@ async def chat(request: ChatRequest):
         # The current AgentLoop instances keep mutable per-run state, so serialize
         # requests while reusing the coordinator.
         async with _chat_lock:
-            result = await coordinator.process(message, session_id=session_id)
+            process_kwargs = {"session_id": session_id}
+            if request.routing_mode != "auto":
+                process_kwargs["context"] = {"_routing_mode": request.routing_mode}
+            result = await coordinator.process(message, **process_kwargs)
 
         elapsed = time.perf_counter() - start
         metrics = get_request_metrics()
         llm_total_time = round(metrics["llm_total_time"], 4)
-        llm_call_count = metrics["llm_call_count"]
         timings = {
             "agent_process_time": round(time.perf_counter() - process_start, 4),
             "api_total_time": round(elapsed, 4),
             "llm_total_time": llm_total_time,
+            "tool_total_time": round(metrics["tool_total_time"], 4),
         }
 
         if not isinstance(result, dict):
@@ -166,8 +185,7 @@ async def chat(request: ChatRequest):
             session_id,
             elapsed,
             timings,
-            llm_total_time=llm_total_time,
-            llm_call_count=llm_call_count,
+            metrics=metrics,
         )
     except Exception as exc:
         logger.error(f"Failed to process chat request session={session_id[:8]}: {exc.__class__.__name__}")

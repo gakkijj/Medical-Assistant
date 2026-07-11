@@ -1,12 +1,17 @@
 """
 Setup script for medix-agent-swarm
 """
-from setuptools import setup, find_packages
+from pathlib import Path
 
-with open("README.md", "r", encoding="utf-8") as fh:
+from setuptools import find_packages, setup
+
+PROJECT_DIR = Path(__file__).resolve().parent
+REPOSITORY_ROOT = PROJECT_DIR.parent
+
+with (REPOSITORY_ROOT / "README.md").open("r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-with open("requirements.txt", "r", encoding="utf-8") as fh:
+with (PROJECT_DIR / "requirements.txt").open("r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
@@ -16,7 +21,7 @@ setup(
     description="Multi-agent medical assistant system based on MediX-R1",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/...",
+    url="https://github.com/gakkijj/Medical-Assistant",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",

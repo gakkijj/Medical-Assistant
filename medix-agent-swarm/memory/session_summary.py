@@ -16,7 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
+import re
 from loguru import logger
+
+
+SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 @dataclass
@@ -268,6 +272,9 @@ class SessionSummaryManager:
 
     def _get_summary_path(self, session_id: str) -> Path:
         """获取会话总结文件路径"""
+        if not SAFE_SESSION_ID.fullmatch(session_id):
+            raise ValueError("session_id contains unsupported characters")
+
         # 按日期组织
         date_str = session_id.split("-")[0] if "-" in session_id else "unknown"
         date_dir = self.base_dir / date_str

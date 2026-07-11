@@ -8,6 +8,7 @@
 
 """
 import json
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from loguru import logger
@@ -47,7 +48,10 @@ class MedicalKnowledgeBase:
             return
 
         if db_path is None:
-            db_path = str(self._project_root / "knowledge" / "data" / "milvus_lite.db")
+            db_path = os.getenv(
+                "MILVUS_DB_PATH",
+                str(self._project_root / "knowledge" / "data" / "milvus_lite.db"),
+            )
 
         self.db_path = db_path
         self.collection_name = collection_name
@@ -221,7 +225,9 @@ class MedicalKnowledgeBase:
                         "id": hit["id"],
                         "content": hit["entity"]["content"],
                         "metadata": json.loads(hit["entity"]["metadata"]),
-                        "score": 1 - hit["distance"]  # 转换为相似度分数
+                        # COSINE search already returns a similarity score where
+                        # larger values are more similar; do not invert it.
+                        "score": float(hit["distance"])
                     })
                 except Exception as e:
                     logger.warning(f"Failed to parse result: {e}")

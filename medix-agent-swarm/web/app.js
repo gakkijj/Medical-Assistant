@@ -122,6 +122,9 @@
       ? `${data.llm_total_time.toFixed(2)} 秒`
       : "未返回";
     const llmCount = typeof data.llm_call_count === "number" ? `${data.llm_call_count} 次` : "未返回";
+    const toolCount = typeof data.tool_call_count === "number" ? `${data.tool_call_count} 次` : "未返回";
+    const tokenCount = typeof data.total_tokens === "number" ? `${data.total_tokens}` : "未返回";
+    const routeMode = data.route && data.route.mode ? data.route.mode : "未返回";
 
     [
       `参与 Agent：${agents}`,
@@ -130,6 +133,9 @@
       `核心处理耗时：${coreTime}`,
       `大模型调用耗时：${llmTime}`,
       `大模型调用次数：${llmCount}`,
+      `Skill 调用次数：${toolCount}`,
+      `Token 总量：${tokenCount}`,
+      `自适应路由：${routeMode}`,
     ].forEach((line) => {
       const row = document.createElement("div");
       row.className = "meta-row";
@@ -137,6 +143,21 @@
       meta.appendChild(row);
     });
     bubble.appendChild(meta);
+
+    if (Array.isArray(data.citations) && data.citations.length > 0) {
+      const title = document.createElement("div");
+      title.className = "section-title";
+      title.textContent = "参考资料";
+      bubble.appendChild(title);
+
+      const list = document.createElement("ul");
+      data.citations.forEach((citation) => {
+        const li = document.createElement("li");
+        li.textContent = `${citation.title || "医学资料"} — ${citation.source || "医学知识库"}`;
+        list.appendChild(li);
+      });
+      bubble.appendChild(list);
+    }
 
     if (data.disclaimer) {
       const disclaimer = document.createElement("div");

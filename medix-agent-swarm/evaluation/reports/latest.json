@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-07-11T09:18:01.496941+00:00",
+  "routing": {
+    "always_single": {
+      "case_count": 18,
+      "route_accuracy": 0.3889,
+      "swarm_rate": 0.0,
+      "lead_planning_rate": 0.0
+    },
+    "always_swarm": {
+      "case_count": 18,
+      "route_accuracy": 0.6111,
+      "swarm_rate": 1.0,
+      "lead_planning_rate": 1.0
+    },
+    "adaptive": {
+      "case_count": 18,
+      "route_accuracy": 1.0,
+      "primary_agent_accuracy": 1.0,
+      "emergency_recall": 1.0,
+      "swarm_rate": 0.6111,
+      "lead_planning_rate": 0.6111,
+      "failures": []
+    }
+  }
+}

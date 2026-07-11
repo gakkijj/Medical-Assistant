@@ -1,0 +1,15 @@
+services:
+  medix:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      MILVUS_DB_PATH: /app/runtime/milvus_lite.db
+    volumes:
+      - medix-data:/app/runtime
+
+volumes:
+  medix-data:

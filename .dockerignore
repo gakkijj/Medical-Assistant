@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.idea
+.vscode
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/knowledge/data/*.db
+**/knowledge/data/*.db-*
+**/memory/swarm/session_summaries
+todo.md

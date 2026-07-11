@@ -9,12 +9,14 @@ SwarmCoordinator：Swarm 入口和智能路由
 类比：交通信号灯，决定车辆走哪条路，但不控制车辆如何行驶
 """
 import asyncio
+import time
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from loguru import logger
 
-from core import LLMClient
+from core import AdaptiveRouter, LLMClient, RouteDecision
+from core.request_metrics import record_route_decision
 from .shared_context import SharedContext
 from .lead_agent import LeadAgent
 from .events import Event, EventType
@@ -41,10 +43,12 @@ class SwarmCoordinator:
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
-        enable_swarm: bool = True
+        enable_swarm: bool = True,
+        router: Optional[AdaptiveRouter] = None,
     ):
         self.llm_client = llm_client or LLMClient()
         self.enable_swarm = enable_swarm
+        self.router = router or AdaptiveRouter()
 
         # 初始化 Agent
         self.lead_agent = LeadAgent(llm_client=self.llm_client)
@@ -81,6 +85,54 @@ class SwarmCoordinator:
             "research_agent": self.research_agent
         }
         return mapping.get(agent_id)
+
+    @staticmethod
+    def _build_router_assessment(
+        question: str,
+        decision: RouteDecision,
+    ) -> Dict[str, Any]:
+        """Build deterministic fallback tasks when LLM planning is unavailable."""
+        descriptions = {
+            "consultation_agent": f"为用户问题提供清晰、可执行的健康建议：{question}",
+            "diagnostic_agent": f"评估症状风险、紧急程度并给出鉴别思路：{question}",
+            "research_agent": f"检索指南和证据，标明来源与适用范围：{question}",
+        }
+        return {
+            "subtasks": [
+                {
+                    "description": descriptions[agent_id],
+                    "assigned_agent": agent_id,
+                }
+                for agent_id in decision.recommended_agents
+            ],
+            "reason": "adaptive_router_fallback",
+        }
+
+    def _ensure_swarm_assessment(
+        self,
+        question: str,
+        assessment: Dict[str, Any],
+        decision: RouteDecision,
+    ) -> Dict[str, Any]:
+        valid_agents = {
+            task.get("assigned_agent")
+            for task in assessment.get("subtasks", [])
+            if self._get_agent_by_id(task.get("assigned_agent")) is not None
+        }
+        if len(valid_agents) >= 2:
+            return assessment
+        logger.warning("LeadAgent returned fewer than two valid workers; using router fallback")
+        return self._build_router_assessment(question, decision)
+
+    @staticmethod
+    def _collect_citations(shared_context: SharedContext) -> List[Dict[str, Any]]:
+        citations: List[Dict[str, Any]] = []
+        for contribution in shared_context.get_contributions():
+            result = contribution.result if isinstance(contribution.result, dict) else {}
+            for citation in result.get("citations", []):
+                if citation not in citations:
+                    citations.append(citation)
+        return citations
 
     async def process(
         self,
@@ -120,7 +172,8 @@ class SwarmCoordinator:
         )
 
         # 3. 构建增强上下文
-        enhanced_context = context or {}
+        enhanced_context = dict(context or {})
+        force_mode = enhanced_context.pop("_routing_mode", None)
 
         # 添加短期记忆
         if recent_history:
@@ -141,17 +194,33 @@ class SwarmCoordinator:
             ]
             logger.info(f"Found {len(similar_memories)} similar historical cases from long-term memory")
 
-        # Step 1: LeadAgent 分解任务
-        assessment = await self.lead_agent.assess_and_decompose(question, enhanced_context)
-        subtasks = assessment.get("subtasks", [])
+        # Step 1: zero-LLM adaptive routing. Simple requests skip LeadAgent.
+        route_start = time.perf_counter()
+        decision = self.router.decide(
+            question,
+            has_history=bool(recent_history),
+            enable_swarm=self.enable_swarm,
+            force_mode=force_mode,
+        )
+        route_data = decision.to_dict()
+        record_route_decision(route_data, time.perf_counter() - route_start)
+        logger.info(
+            f"Adaptive route: mode={decision.mode}, primary={decision.primary_agent}, "
+            f"score={decision.complexity_score}, reasons={decision.reason_codes}"
+        )
 
-        logger.info(f"LeadAgent 分解任务：{len(subtasks)} 个")
+        if decision.mode == "swarm":
+            assessment = await self.lead_agent.assess_and_decompose(question, enhanced_context)
+            assessment = self._ensure_swarm_assessment(question, assessment, decision)
+        else:
+            assessment = self._build_router_assessment(question, decision)
+        subtasks = assessment.get("subtasks", [])
 
         # Step 2: 根据任务数量路由
         final_answer = None
         mode = None
 
-        if len(subtasks) == 1:
+        if decision.mode == "single":
             # 单任务 → 直接调用对应 Agent
             task = subtasks[0]
             agent_id = task.get("assigned_agent")
@@ -174,7 +243,8 @@ class SwarmCoordinator:
             result.update({
                 'swarm_enabled': False,
                 'session_id': session_id,
-                'route_reason': f'单任务路由到 {agent_id}'
+                'route_reason': f'自适应路由到 {agent_id}',
+                'route': route_data,
             })
 
             # 确保单Agent模式下也有 disclaimer 字段
@@ -185,7 +255,7 @@ class SwarmCoordinator:
             if 'suggestions' not in result:
                 result['suggestions'] = []
 
-        elif len(subtasks) >= 2 and self.enable_swarm:
+        elif decision.mode == "swarm" and self.enable_swarm:
             # 多任务 → 启动 Swarm
             logger.info(f"Route: Swarm (Multi-Agent Collaboration) - {len(subtasks)} tasks")
             mode = "swarm"
@@ -194,7 +264,8 @@ class SwarmCoordinator:
                 context=enhanced_context,
                 assessment=assessment,
                 session_id=session_id,
-                start_time=start_time
+                start_time=start_time,
+                route_decision=decision,
             )
             final_answer = result.get('answer', '')
 
@@ -218,7 +289,8 @@ class SwarmCoordinator:
             final_answer = result.get('answer', '')
             result.update({
                 'swarm_enabled': False,
-                'session_id': session_id
+                'session_id': session_id,
+                'route': route_data,
             })
 
         # ===== 统一的记忆保存（非 Swarm 模式）=====
@@ -251,7 +323,8 @@ class SwarmCoordinator:
         context: Optional[Dict[str, Any]],
         assessment: Dict[str, Any],
         session_id: str,
-        start_time: datetime
+        start_time: datetime,
+        route_decision: RouteDecision,
     ) -> Dict[str, Any]:
         """
         使用 Swarm 处理复杂问题
@@ -380,7 +453,9 @@ class SwarmCoordinator:
             'subtasks_completed': len(shared_context.get_all_completed_subtasks()),
             'total_time': (end_time - start_time).total_seconds(),
             'swarm_metadata': shared_context.get_summary(),
-            'timeout_occurred': timeout_occurred
+            'timeout_occurred': timeout_occurred,
+            'route': route_decision.to_dict(),
+            'citations': self._collect_citations(shared_context),
         }
 
         # 提取建议和免责声明（简化实现）

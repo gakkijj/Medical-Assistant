@@ -70,6 +70,23 @@ class LLMClient:
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
+    @staticmethod
+    def _usage_values(response: Any) -> tuple[int, int, int]:
+        """Normalize token usage across OpenAI-compatible providers."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return 0, 0, 0
+        prompt_tokens = int(
+            getattr(usage, "prompt_tokens", getattr(usage, "input_tokens", 0)) or 0
+        )
+        completion_tokens = int(
+            getattr(usage, "completion_tokens", getattr(usage, "output_tokens", 0)) or 0
+        )
+        total_tokens = int(
+            getattr(usage, "total_tokens", prompt_tokens + completion_tokens) or 0
+        )
+        return prompt_tokens, completion_tokens, total_tokens
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -95,6 +112,8 @@ class LLMClient:
             logger.debug(f"Calling LLM ({self.model_type}) with {len(messages)} messages")
 
             start = time.perf_counter()
+            response = None
+            success = False
             try:
                 response = await self.client.chat.completions.create(
                     model=self.model_name,
@@ -103,8 +122,17 @@ class LLMClient:
                     max_tokens=max_tokens,
                     **kwargs
                 )
+                success = True
             finally:
-                record_llm_call(time.perf_counter() - start)
+                prompt_tokens, completion_tokens, total_tokens = self._usage_values(response)
+                record_llm_call(
+                    time.perf_counter() - start,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    success=success,
+                    operation="chat",
+                )
 
             content = response.choices[0].message.content
             logger.debug(f"LLM response length: {len(content)} chars")
@@ -196,10 +224,21 @@ class LLMClient:
                     request_params["tool_choice"] = tool_choice
 
             start = time.perf_counter()
+            response = None
+            success = False
             try:
                 response = await self.client.chat.completions.create(**request_params)
+                success = True
             finally:
-                record_llm_call(time.perf_counter() - start)
+                prompt_tokens, completion_tokens, total_tokens = self._usage_values(response)
+                record_llm_call(
+                    time.perf_counter() - start,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    success=success,
+                    operation="chat_with_tools",
+                )
 
             # 解析响应
             message = response.choices[0].message

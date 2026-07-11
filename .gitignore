@@ -4,3 +4,16 @@
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Local tooling
+.idea/
+.vscode/
+**/.claude/settings.local.json
+
+# Runtime state and generated reports
+**/knowledge/data/*.db
+**/knowledge/data/*.db-*
+**/knowledge/data/.*.db.lock
+**/memory/swarm/session_summaries/
+**/memory/agents/*/IDENTITY.md
+*.lock

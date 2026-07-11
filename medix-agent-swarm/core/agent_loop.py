@@ -6,11 +6,13 @@ Agent循环引擎
 """
 import uuid
 import json
+import time
 from typing import Dict, Any, List, Optional
 from loguru import logger
 
 from .state_manager import StateManager, TaskStatus
 from .llm_client import LLMResponse
+from .request_metrics import record_tool_call
 
 # Harness Engineering: 约束验证和自动修复
 try:
@@ -74,6 +76,7 @@ class AgentLoop:
 
         # 重置计数
         self.tool_call_count = 0
+        collected_citations: List[Dict[str, Any]] = []
 
         logger.info(f"Starting Agent Loop for {agent.agent_id}, task_id={task_id}")
 
@@ -168,10 +171,28 @@ class AgentLoop:
                                         f"⚠️ 约束警告: {validation_result.get('reason')}"
                                     )
 
-                            tool_result = await agent.execute_tool(
-                                tool_name=tool_call.name,
-                                arguments=tool_call.arguments
-                            )
+                            tool_start = time.perf_counter()
+                            tool_success = False
+                            try:
+                                tool_result = await agent.execute_tool(
+                                    tool_name=tool_call.name,
+                                    arguments=tool_call.arguments
+                                )
+                                tool_success = not (
+                                    isinstance(tool_result, dict)
+                                    and tool_result.get("success") is False
+                                )
+                            finally:
+                                record_tool_call(
+                                    tool_call.name,
+                                    time.perf_counter() - tool_start,
+                                    success=tool_success,
+                                )
+
+                            if isinstance(tool_result, dict):
+                                for citation in tool_result.get("citations", []):
+                                    if citation not in collected_citations:
+                                        collected_citations.append(citation)
 
                             # 添加结果消息
                             messages.append(
@@ -196,7 +217,7 @@ class AgentLoop:
 
                     # 情况2: LLM 返回文本响应，任务完成
                     else:
-                        logger.info(f"LLM provided final response (no tool calls)")
+                        logger.info("LLM provided final response (no tool calls)")
 
                         # Harness Engineering: 验证和修复输出
                         final_answer = llm_response.content
@@ -234,7 +255,8 @@ class AgentLoop:
                         result = {
                             'answer': final_answer,
                             'iterations': state.iteration,
-                            'agent_id': agent.agent_id
+                            'agent_id': agent.agent_id,
+                            'citations': collected_citations,
                         }
 
                         # 让 Agent 进行结果后处理（如提取建议等）
@@ -253,7 +275,7 @@ class AgentLoop:
 
             # 如果达到最大迭代次数但没有完成
             if not state.is_completed():
-                logger.warning(f"Max iterations reached without completion")
+                logger.warning("Max iterations reached without completion")
 
                 # 强制调用 LLM 生成最终总结
                 try:
@@ -275,7 +297,8 @@ class AgentLoop:
                     result = {
                         'answer': final_response.content or '抱歉，未能完成任务',
                         'iterations': state.iteration,
-                        'warning': 'max_iterations_reached'
+                        'warning': 'max_iterations_reached',
+                        'citations': collected_citations,
                     }
 
                     # 记录最终回答到短期记忆
@@ -296,7 +319,8 @@ class AgentLoop:
                         'answer': '抱歉，系统在处理您的问题时遇到了问题。建议您简化问题或稍后重试。',
                         'iterations': state.iteration,
                         'warning': 'max_iterations_reached',
-                        'error': str(e)
+                        'error': str(e),
+                        'citations': collected_citations,
                     }
                     state.mark_completed(result)
 
