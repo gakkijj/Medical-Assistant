@@ -11,6 +11,7 @@ SwarmCoordinator：Swarm 入口和智能路由
 import asyncio
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from loguru import logger
@@ -124,6 +125,40 @@ class SwarmCoordinator:
         logger.warning("LeadAgent returned fewer than two valid workers; using router fallback")
         return self._build_router_assessment(question, decision)
 
+    def _resolve_llm_fallback(
+        self,
+        decision: RouteDecision,
+        assessment: Dict[str, Any],
+    ) -> RouteDecision:
+        """Use the first valid LeadAgent assignment to resolve a low-confidence tie."""
+        selected_agent = next((
+            task.get("assigned_agent")
+            for task in assessment.get("subtasks", [])
+            if self._get_agent_by_id(task.get("assigned_agent")) is not None
+        ), None)
+        if not selected_agent:
+            return decision
+        intent_by_agent = {
+            "consultation_agent": "consultation",
+            "diagnostic_agent": "diagnosis",
+            "research_agent": "research",
+        }
+        return replace(
+            decision,
+            intent=intent_by_agent[selected_agent],
+            primary_agent=selected_agent,
+            recommended_agents=(
+                decision.recommended_agents
+                if decision.mode == "swarm"
+                else (selected_agent,)
+            ),
+            confidence=max(decision.confidence, 0.75),
+            reason_codes=tuple(decision.reason_codes) + ("llm_fallback_applied",),
+            fallback_required=False,
+            router_stage="llm_fallback",
+            lead_planning_required=True,
+        )
+
     @staticmethod
     def _collect_citations(shared_context: SharedContext) -> List[Dict[str, Any]]:
         citations: List[Dict[str, Any]] = []
@@ -155,7 +190,7 @@ class SwarmCoordinator:
         if session_id is None:
             session_id = f"{start_time.strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:8]}"
 
-        logger.info(f"Processing question (session={session_id}): {question[:50]}...")
+        logger.info(f"Processing question session={session_id} length={len(question)}")
 
         # ===== 统一的记忆检索（所有模式都使用）=====
         # 1. 检索短期记忆（当前会话历史）
@@ -202,18 +237,26 @@ class SwarmCoordinator:
             enable_swarm=self.enable_swarm,
             force_mode=force_mode,
         )
+        if decision.mode == "swarm":
+            assessment = await self.lead_agent.assess_and_decompose(question, enhanced_context)
+            assessment = self._ensure_swarm_assessment(question, assessment, decision)
+            if decision.fallback_required:
+                decision = self._resolve_llm_fallback(decision, assessment)
+        elif decision.fallback_required:
+            fallback_assessment = await self.lead_agent.assess_and_decompose(
+                question,
+                enhanced_context,
+            )
+            decision = self._resolve_llm_fallback(decision, fallback_assessment)
+            assessment = self._build_router_assessment(question, decision)
+        else:
+            assessment = self._build_router_assessment(question, decision)
         route_data = decision.to_dict()
         record_route_decision(route_data, time.perf_counter() - route_start)
         logger.info(
             f"Adaptive route: mode={decision.mode}, primary={decision.primary_agent}, "
             f"score={decision.complexity_score}, reasons={decision.reason_codes}"
         )
-
-        if decision.mode == "swarm":
-            assessment = await self.lead_agent.assess_and_decompose(question, enhanced_context)
-            assessment = self._ensure_swarm_assessment(question, assessment, decision)
-        else:
-            assessment = self._build_router_assessment(question, decision)
         subtasks = assessment.get("subtasks", [])
 
         # Step 2: 根据任务数量路由
@@ -338,10 +381,6 @@ class SwarmCoordinator:
 
         # 创建 SharedContext
         shared_context = SharedContext(session_id=session_id)
-
-        # 附加 SharedContext 到所有 Worker
-        for worker in self.worker_pool:
-            worker.attach_shared_context(shared_context)
 
         # 发布 Swarm 启动事件
         shared_context.publish_event(Event(
@@ -512,7 +551,7 @@ class SwarmCoordinator:
     async def _execute_single_subtask(self, worker, subtask, shared_context):
         """执行单个子任务"""
         try:
-            result = await worker.process_subtask(subtask)
+            result = await worker.process_subtask(subtask, shared_context=shared_context)
             shared_context.complete_subtask(subtask.id, worker.agent_id, result)
             logger.info(f"{worker.agent_id}: Completed {subtask.type}")
         except Exception as e:

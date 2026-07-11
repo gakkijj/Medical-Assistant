@@ -1,4 +1,5 @@
 """Request-scoped performance metrics."""
+from __future__ import annotations
 from contextvars import ContextVar
 from copy import deepcopy
 from time import perf_counter

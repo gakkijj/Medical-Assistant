@@ -48,6 +48,36 @@ class AdaptiveRouterTest(unittest.TestCase):
         self.assertEqual(decision.mode, "swarm")
         self.assertGreaterEqual(len(decision.recommended_agents), 2)
 
+    def test_simple_diagnostic_intent_can_stay_single_agent(self):
+        decision = self.router.decide("轻微头痛可能是什么原因？")
+        self.assertEqual(decision.mode, "single")
+        self.assertEqual(decision.intent, "diagnosis")
+        self.assertEqual(decision.primary_agent, "diagnostic_agent")
+
+    def test_simple_research_intent_can_stay_single_agent(self):
+        decision = self.router.decide("高血压的诊断标准是什么？")
+        self.assertEqual(decision.mode, "single")
+        self.assertEqual(decision.primary_agent, "research_agent")
+        self.assertEqual(decision.intent, "research")
+
+    def test_negated_emergency_phrase_does_not_raise_emergency(self):
+        decision = self.router.decide("我没有胸痛，只是想了解日常运动建议")
+        self.assertEqual(decision.risk_level, "normal")
+        self.assertNotIn("emergency_signal", decision.reason_codes)
+
+    def test_colloquial_emergency_expression_is_detected(self):
+        decision = self.router.decide("心口像压着石头，还喘不上气")
+        self.assertEqual(decision.risk_level, "emergency")
+        self.assertEqual(decision.router_stage, "safety_rule")
+        self.assertEqual(decision.confidence, 1.0)
+
+    def test_route_exposes_auditable_metadata(self):
+        decision = self.router.decide("应该如何预防高血压？")
+        payload = decision.to_dict()
+        self.assertIn("confidence", payload)
+        self.assertIn("router_stage", payload)
+        self.assertIn("matched_signals", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

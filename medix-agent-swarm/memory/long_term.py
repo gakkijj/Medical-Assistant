@@ -224,10 +224,9 @@ class LongTermMemory:
             # 限制返回数量
             formatted_results = formatted_results[:limit]
 
-            logger.info(f"Found {len(formatted_results)} similar sessions for query: {query[:50]}...")
+            logger.info(f"Found {len(formatted_results)} similar sessions for query_length={len(query)}")
             return formatted_results
 
         except Exception as e:
             logger.error(f"Failed to search similar sessions: {e}")
             return []
-

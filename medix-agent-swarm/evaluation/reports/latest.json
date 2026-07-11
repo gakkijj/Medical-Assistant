@@ -1,25 +1,57 @@
 {
-  "generated_at": "2026-07-11T09:18:01.496941+00:00",
+  "generated_at": "2026-07-11T14:02:11.030149+00:00",
   "routing": {
     "always_single": {
-      "case_count": 18,
-      "route_accuracy": 0.3889,
+      "case_count": 40,
+      "route_accuracy": 0.45,
       "swarm_rate": 0.0,
       "lead_planning_rate": 0.0
     },
     "always_swarm": {
-      "case_count": 18,
-      "route_accuracy": 0.6111,
+      "case_count": 40,
+      "route_accuracy": 0.55,
       "swarm_rate": 1.0,
       "lead_planning_rate": 1.0
     },
     "adaptive": {
-      "case_count": 18,
+      "case_count": 40,
       "route_accuracy": 1.0,
       "primary_agent_accuracy": 1.0,
+      "route_macro_f1": 1.0,
       "emergency_recall": 1.0,
-      "swarm_rate": 0.6111,
-      "lead_planning_rate": 0.6111,
+      "swarm_rate": 0.55,
+      "lead_planning_rate": 0.55,
+      "fallback_rate": 0.05,
+      "mean_confidence": 0.9477,
+      "failures": []
+    }
+  },
+  "retrieval": {
+    "bm25": {
+      "case_count": 12,
+      "strategy": "bm25",
+      "top_k": 5,
+      "hit_rate_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 0.9167,
+      "failures": []
+    },
+    "vector": {
+      "case_count": 12,
+      "strategy": "vector",
+      "top_k": 5,
+      "hit_rate_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 0.8611,
+      "failures": []
+    },
+    "hybrid": {
+      "case_count": 12,
+      "strategy": "hybrid",
+      "top_k": 5,
+      "hit_rate_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 0.875,
       "failures": []
     }
   }

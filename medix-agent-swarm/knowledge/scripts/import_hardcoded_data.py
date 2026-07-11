@@ -49,15 +49,15 @@ def load_documents_from_directory(doc_dir: Path) -> list:
             if file_num.startswith('0') and int(file_num) < 10:
                 # 01-09: 生活方式建议
                 doc_type = "lifestyle"
-                source = "生活方式建议数据库"
+                source = "项目演示生活方式资料"
             elif 10 <= int(file_num) < 20:
                 # 10-19: ICD-10疾病编码
                 doc_type = "disease_classification"
-                source = "ICD-10疾病编码数据库"
+                source = "项目演示疾病分类资料"
             elif 20 <= int(file_num) < 30:
                 # 20-29: 临床指南
                 doc_type = "clinical_guideline"
-                source = "临床指南数据库"
+                source = "项目演示临床指南资料"
             else:
                 doc_type = "general"
                 source = "医学知识库"

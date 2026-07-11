@@ -149,7 +149,7 @@ class DeepResearchWorkflow:
         """
         try:
             results = self.knowledge_base.search(query=query, top_k=top_k, filter_type=None)
-            logger.debug(f"Milvus search returned {len(results)} results for: {query[:50]}...")
+            logger.debug(f"Milvus search returned {len(results)} results for query_length={len(query)}")
             return results
         except Exception as e:
             logger.error(f"Milvus search failed: {e}")

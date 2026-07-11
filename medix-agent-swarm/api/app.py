@@ -1,5 +1,7 @@
 """FastAPI application for the MediX multi-agent assistant."""
+from __future__ import annotations
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
@@ -7,9 +9,9 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -23,7 +25,9 @@ from core.request_metrics import (  # noqa: E402
     reset_request_metrics,
     start_request_metrics,
 )
+from core.service_metrics import service_metrics  # noqa: E402
 from .schemas import ChatRequest, ChatResponse  # noqa: E402
+from .security import inspect_message  # noqa: E402
 
 
 app = FastAPI(
@@ -49,6 +53,16 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 WEB_DIR = PROJECT_ROOT / "web"
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -56,7 +70,10 @@ if WEB_DIR.exists():
 _coordinator: SwarmCoordinator | None = None
 _coordinator_init_time: float | None = None
 _coordinator_lock = asyncio.Lock()
-_chat_lock = asyncio.Lock()
+_max_concurrency = max(1, int(os.getenv("MEDIX_MAX_CONCURRENCY", "8")))
+_request_timeout = max(1.0, float(os.getenv("MEDIX_REQUEST_TIMEOUT_SECONDS", "120")))
+_expose_raw_response = os.getenv("MEDIX_EXPOSE_RAW_RESPONSE", "false").lower() == "true"
+_chat_slots = asyncio.Semaphore(_max_concurrency)
 
 
 async def _get_coordinator() -> tuple[SwarmCoordinator, float]:
@@ -95,6 +112,7 @@ def _adapt_chat_result(
     elapsed: float,
     timings: dict[str, float],
     metrics: dict[str, Any],
+    request_id: str | None = None,
 ) -> ChatResponse:
     """Normalize the existing swarm result without changing core logic."""
     agents_involved = _as_string_list(result.get("agents_involved"))
@@ -107,6 +125,7 @@ def _adapt_chat_result(
 
     return ChatResponse(
         session_id=str(result.get("session_id") or fallback_session_id),
+        request_id=request_id,
         answer=str(result.get("answer") or "抱歉，系统暂时没有返回有效回答。"),
         suggestions=_as_string_list(result.get("suggestions")),
         disclaimer=result.get("disclaimer"),
@@ -124,7 +143,7 @@ def _adapt_chat_result(
         citations=result.get("citations") or [],
         trace=metrics.get("events") or [],
         timings=timings,
-        raw=result,
+        raw=result if _expose_raw_response else None,
     )
 
 
@@ -142,17 +161,30 @@ async def health():
         "status": "ok",
         "coordinator_ready": _coordinator is not None,
         "coordinator_init_time": _coordinator_init_time,
+        "max_concurrency": _max_concurrency,
+        "request_timeout_seconds": _request_timeout,
     }
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    message = request.message.strip()
+@app.get("/api/metrics", response_class=PlainTextResponse)
+async def metrics():
+    return service_metrics.prometheus()
+
+
+async def _process_chat(payload: ChatRequest, request_id: str) -> ChatResponse:
+    message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="message cannot be empty")
+    safety = inspect_message(message)
+    if not safety.allowed:
+        logger.warning(f"blocked unsafe input request={request_id[:8]} reasons={safety.reason_codes}")
+        raise HTTPException(status_code=400, detail="请求包含不支持的控制指令。")
 
-    session_id = request.session_id or str(uuid4())
+    session_id = payload.session_id or str(uuid4())
     start = time.perf_counter()
+    outcome = "error"
+    route_mode = None
+    service_metrics.start_request()
     metrics_token = start_request_metrics()
     logger.info(f"chat request session={session_id[:8]} message_length={len(message)}")
 
@@ -160,13 +192,16 @@ async def chat(request: ChatRequest):
         coordinator, init_time = await _get_coordinator()
         process_start = time.perf_counter()
 
-        # The current AgentLoop instances keep mutable per-run state, so serialize
-        # requests while reusing the coordinator.
-        async with _chat_lock:
+        # Agent execution state is request-local. The semaphore protects the
+        # external LLM and memory backends without serializing all traffic.
+        async with _chat_slots:
             process_kwargs = {"session_id": session_id}
-            if request.routing_mode != "auto":
-                process_kwargs["context"] = {"_routing_mode": request.routing_mode}
-            result = await coordinator.process(message, **process_kwargs)
+            if payload.routing_mode != "auto":
+                process_kwargs["context"] = {"_routing_mode": payload.routing_mode}
+            result = await asyncio.wait_for(
+                coordinator.process(message, **process_kwargs),
+                timeout=_request_timeout,
+            )
 
         elapsed = time.perf_counter() - start
         metrics = get_request_metrics()
@@ -180,18 +215,63 @@ async def chat(request: ChatRequest):
 
         if not isinstance(result, dict):
             result = {"answer": str(result), "session_id": session_id}
-        return _adapt_chat_result(
+        response = _adapt_chat_result(
             result,
             session_id,
             elapsed,
             timings,
             metrics=metrics,
+            request_id=request_id,
         )
+        route_mode = (response.route or {}).get("mode")
+        outcome = "success"
+        return response
+    except asyncio.TimeoutError as exc:
+        outcome = "timeout"
+        logger.warning(f"chat timeout request={request_id[:8]} session={session_id[:8]}")
+        raise HTTPException(status_code=504, detail="请求处理超时，请缩短问题后重试。") from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error(f"Failed to process chat request session={session_id[:8]}: {exc.__class__.__name__}")
+        logger.error(
+            f"chat failed request={request_id[:8]} session={session_id[:8]} "
+            f"error={exc.__class__.__name__}"
+        )
         raise HTTPException(
             status_code=500,
             detail="系统处理请求时出现错误，请稍后重试。",
         ) from exc
     finally:
+        service_metrics.finish_request(outcome, time.perf_counter() - start, route_mode)
         reset_request_metrics(metrics_token)
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest, http_request: Request):
+    request_id = http_request.headers.get("X-Request-ID") or str(uuid4())
+    return await _process_chat(payload, request_id)
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(payload: ChatRequest, http_request: Request):
+    """Stream request lifecycle events as SSE; the final event contains the answer."""
+    request_id = http_request.headers.get("X-Request-ID") or str(uuid4())
+
+    async def event_stream():
+        accepted = json.dumps({"request_id": request_id, "status": "accepted"}, ensure_ascii=False)
+        yield f"event: accepted\ndata: {accepted}\n\n"
+        try:
+            response = await _process_chat(payload, request_id)
+            if hasattr(response, "model_dump"):
+                data = response.model_dump()
+            else:
+                data = response.dict()
+            yield f"event: complete\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        except HTTPException as exc:
+            error = json.dumps(
+                {"request_id": request_id, "status": exc.status_code, "detail": exc.detail},
+                ensure_ascii=False,
+            )
+            yield f"event: error\ndata: {error}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

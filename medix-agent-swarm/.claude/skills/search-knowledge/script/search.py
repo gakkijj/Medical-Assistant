@@ -2,6 +2,8 @@
 Search Knowledge Skill
 搜索医学知识库 Skill（自包含，无需依赖tools）
 """
+import os
+from pathlib import Path
 from typing import Dict, Any
 from loguru import logger
 
@@ -13,8 +15,16 @@ def get_knowledge_base():
     """获取知识库单例"""
     global _kb_instance
     if _kb_instance is None:
-        from knowledge.milvus_kb import MedicalKnowledgeBase
-        _kb_instance = MedicalKnowledgeBase()
+        backend = os.getenv("MEDIX_RETRIEVER", "hybrid").strip().lower()
+        if backend == "milvus":
+            from knowledge.milvus_kb import MedicalKnowledgeBase
+            _kb_instance = MedicalKnowledgeBase()
+        else:
+            from knowledge.hybrid_retriever import HybridRetriever
+            project_root = Path(__file__).resolve().parents[4]
+            _kb_instance = HybridRetriever.from_directory(
+                project_root / "knowledge/data/documents"
+            )
     return _kb_instance
 
 
@@ -38,7 +48,7 @@ async def search_knowledge(query: str, max_results: int = 5) -> Dict[str, Any]:
     # 获取知识库单例（避免重复加载模型）
     kb = get_knowledge_base()
 
-    # 使用 Milvus 进行语义检索
+    # 默认使用可离线回归的混合检索；可通过 MEDIX_RETRIEVER=milvus 切换。
     results = kb.search(
         query=query,
         top_k=max_results,
@@ -48,14 +58,16 @@ async def search_knowledge(query: str, max_results: int = 5) -> Dict[str, Any]:
     # 格式化结果
     formatted_results = []
     for doc in results:
+        metadata = doc.get("metadata", {})
         formatted_results.append({
-            "title": f"关于{doc['metadata'].get('disease', query)}的医学信息",
+            "title": metadata.get("title") or f"关于{metadata.get('disease', query)}的医学信息",
             "content": doc["content"],
-            "source": doc["metadata"].get("source", "医学知识库"),
+            "source": metadata.get("source", "医学知识库"),
             "score": doc["score"],
-            "type": doc["metadata"].get("type"),
-            "doc_id": doc["metadata"].get("doc_id"),
-            "filename": doc["metadata"].get("filename"),
+            "type": metadata.get("type"),
+            "doc_id": doc.get("doc_id") or metadata.get("doc_id"),
+            "filename": metadata.get("filename"),
+            "section": metadata.get("section"),
         })
 
     # Skill 的格式化输出
@@ -72,6 +84,7 @@ async def search_knowledge(query: str, max_results: int = 5) -> Dict[str, Any]:
                     "score": round(float(item["score"]), 4),
                     "doc_id": item.get("doc_id"),
                     "filename": item.get("filename"),
+                    "section": item.get("section"),
                 }
                 for index, item in enumerate(formatted_results, 1)
             ],

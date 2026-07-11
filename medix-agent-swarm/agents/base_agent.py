@@ -144,7 +144,11 @@ class BaseAgent(ABC):
         """附加 AgentIdentityManager（由 Swarm 调用）"""
         self.identity_manager = identity_manager
 
-    async def process_subtask(self, subtask: Any) -> Dict[str, Any]:
+    async def process_subtask(
+        self,
+        subtask: Any,
+        shared_context: Optional[Any] = None,
+    ) -> Dict[str, Any]:
         """
         处理子任务（Swarm 模式）
 
@@ -157,7 +161,8 @@ class BaseAgent(ABC):
             'subtask_id': subtask.id,
             'subtask_type': subtask.type
         }
-        if self.shared_context and getattr(self.shared_context, "session_id", None):
-            input_data['session_id'] = self.shared_context.session_id
+        context = shared_context or self.shared_context
+        if context and getattr(context, "session_id", None):
+            input_data['session_id'] = context.session_id
 
         return await self.run_loop(input_data)

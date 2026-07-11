@@ -1,0 +1,12 @@
+{"id":"hypertension_salt","query":"高血压患者每天应该摄入多少盐","relevant_doc_ids":["lifestyle_01_lifestyle_hypertension"]}
+{"id":"hypertension_exercise","query":"血压高适合做哪些运动","relevant_doc_ids":["lifestyle_01_lifestyle_hypertension"]}
+{"id":"hypertension_diagnosis","query":"高血压诊断标准和家庭血压监测","relevant_doc_ids":["clinical_guideline_20_guideline_hypertension","disease_classification_10_icd10_cardiovascular"]}
+{"id":"diabetes_diagnosis","query":"空腹血糖和糖化血红蛋白达到多少诊断糖尿病","relevant_doc_ids":["clinical_guideline_21_guideline_diabetes","disease_classification_11_icd10_endocrine"]}
+{"id":"diabetes_diet","query":"糖尿病饮食和低GI食物建议","relevant_doc_ids":["lifestyle_02_lifestyle_diabetes"]}
+{"id":"diabetes_exercise","query":"糖尿病餐后运动需要注意低血糖","relevant_doc_ids":["lifestyle_02_lifestyle_diabetes"]}
+{"id":"cold_rest","query":"普通感冒发热期间能否剧烈运动","relevant_doc_ids":["lifestyle_03_lifestyle_cold"]}
+{"id":"cold_infectious","query":"普通感冒是病毒感染还是需要抗生素","relevant_doc_ids":["disease_classification_12_icd10_infectious"]}
+{"id":"emergency_chest","query":"突发胸痛伴随冒冷汗应该如何急救","relevant_doc_ids":["lifestyle_05_symptoms_emergency"]}
+{"id":"emergency_breathing","query":"突然严重呼吸困难嘴唇发紫怎么办","relevant_doc_ids":["lifestyle_05_symptoms_emergency"]}
+{"id":"general_sleep","query":"成年人每天睡眠时长和改善睡眠的方法","relevant_doc_ids":["lifestyle_04_lifestyle_general_health"]}
+{"id":"flu_symptoms","query":"流行性感冒高热肌肉酸痛如何治疗","relevant_doc_ids":["disease_classification_12_icd10_infectious"]}

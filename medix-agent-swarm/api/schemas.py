@@ -1,4 +1,5 @@
 """Pydantic schemas for the Web API."""
+from __future__ import annotations
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -25,6 +26,7 @@ class ChatResponse(BaseModel):
     """Normalized chat response for the frontend."""
 
     session_id: str
+    request_id: Optional[str] = None
     answer: str
     suggestions: Optional[list[str]] = None
     disclaimer: Optional[str] = None

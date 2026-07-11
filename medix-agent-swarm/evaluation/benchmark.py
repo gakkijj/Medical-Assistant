@@ -31,8 +31,45 @@ def load_cases(path: Path) -> List[Dict[str, Any]]:
     return cases
 
 
+def load_retrieval_cases(path: Path) -> List[Dict[str, Any]]:
+    cases = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            case = json.loads(line)
+            missing = {"id", "query", "relevant_doc_ids"} - case.keys()
+            if missing:
+                raise ValueError(f"{path}:{line_number} missing fields: {sorted(missing)}")
+            if not case["relevant_doc_ids"]:
+                raise ValueError(f"{path}:{line_number} has no relevant documents")
+            cases.append(case)
+    if not cases:
+        raise ValueError(f"retrieval benchmark is empty: {path}")
+    return cases
+
+
 def _safe_div(numerator: int, denominator: int) -> float:
     return numerator / denominator if denominator else 0.0
+
+
+def _macro_f1(rows: List[Dict[str, Any]], expected_key: str, predicted_key: str) -> float:
+    labels = sorted({str(row[expected_key]) for row in rows})
+    scores = []
+    for label in labels:
+        true_positive = sum(
+            row[expected_key] == label and row[predicted_key] == label for row in rows
+        )
+        false_positive = sum(
+            row[expected_key] != label and row[predicted_key] == label for row in rows
+        )
+        false_negative = sum(
+            row[expected_key] == label and row[predicted_key] != label for row in rows
+        )
+        precision = _safe_div(true_positive, true_positive + false_positive)
+        recall = _safe_div(true_positive, true_positive + false_negative)
+        scores.append(_safe_div(2 * precision * recall, precision + recall))
+    return round(statistics.fmean(scores), 4) if scores else 0.0
 
 
 def evaluate_router(
@@ -53,6 +90,9 @@ def evaluate_router(
             "emergency": bool(case["emergency"]),
             "predicted_emergency": decision.risk_level == "emergency",
             "complexity_score": decision.complexity_score,
+            "confidence": decision.confidence,
+            "router_stage": decision.router_stage,
+            "fallback_required": decision.fallback_required,
             "reason_codes": list(decision.reason_codes),
         })
 
@@ -67,6 +107,7 @@ def evaluate_router(
             sum(row["expected_agent"] == row["predicted_agent"] for row in rows),
             len(rows),
         ), 4),
+        "route_macro_f1": _macro_f1(rows, "expected_mode", "predicted_mode"),
         "emergency_recall": round(_safe_div(
             sum(row["predicted_emergency"] for row in emergency_rows),
             len(emergency_rows),
@@ -78,6 +119,13 @@ def evaluate_router(
         "lead_planning_rate": round(_safe_div(
             sum(row["predicted_mode"] == "swarm" for row in rows),
             len(rows),
+        ), 4),
+        "fallback_rate": round(_safe_div(
+            sum(row["fallback_required"] for row in rows),
+            len(rows),
+        ), 4),
+        "mean_confidence": round(statistics.fmean(
+            row["confidence"] for row in rows
         ), 4),
         "failures": [
             row for row in rows
@@ -104,6 +152,38 @@ def evaluate_static_baseline(
         ), 4),
         "swarm_rate": 1.0 if mode == "swarm" else 0.0,
         "lead_planning_rate": 1.0 if mode == "swarm" else 0.0,
+    }
+
+
+def evaluate_retriever(
+    cases: Iterable[Mapping[str, Any]],
+    retriever: Any,
+    *,
+    top_k: int = 5,
+    strategy: str = "hybrid",
+) -> Dict[str, Any]:
+    """Evaluate document-level retrieval recall and reciprocal rank."""
+    rows = []
+    for case in cases:
+        results = retriever.search(str(case["query"]), top_k=top_k, strategy=strategy)
+        retrieved = [str(item.get("doc_id") or item.get("metadata", {}).get("doc_id")) for item in results]
+        relevant = {str(doc_id) for doc_id in case["relevant_doc_ids"]}
+        relevant_ranks = [rank for rank, doc_id in enumerate(retrieved, 1) if doc_id in relevant]
+        rows.append({
+            "id": case["id"],
+            "retrieved_doc_ids": retrieved,
+            "relevant_doc_ids": sorted(relevant),
+            "recall": _safe_div(len(set(retrieved) & relevant), len(relevant)),
+            "reciprocal_rank": 1 / min(relevant_ranks) if relevant_ranks else 0.0,
+        })
+    return {
+        "case_count": len(rows),
+        "strategy": strategy,
+        "top_k": top_k,
+        "hit_rate_at_k": round(_safe_div(sum(row["reciprocal_rank"] > 0 for row in rows), len(rows)), 4),
+        "recall_at_k": round(statistics.fmean(row["recall"] for row in rows), 4),
+        "mrr": round(statistics.fmean(row["reciprocal_rank"] for row in rows), 4),
+        "failures": [row for row in rows if row["reciprocal_rank"] == 0],
     }
 
 

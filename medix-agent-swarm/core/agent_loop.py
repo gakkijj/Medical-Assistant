@@ -47,7 +47,6 @@ class AgentLoop:
         self.max_tool_calls = max_tool_calls
         self.state_manager = StateManager()
         self.short_term_memory = short_term_memory
-        self.tool_call_count = 0
 
         # Harness Engineering: 约束验证器和自动修复器
         self.validator = ConstraintValidator() if CONSTRAINTS_ENABLED else None
@@ -74,8 +73,8 @@ class AgentLoop:
             max_iterations=self.max_iterations
         )
 
-        # 重置计数
-        self.tool_call_count = 0
+        # Keep request state local so one Agent instance can serve concurrent calls.
+        tool_call_count = 0
         collected_citations: List[Dict[str, Any]] = []
 
         logger.info(f"Starting Agent Loop for {agent.agent_id}, task_id={task_id}")
@@ -131,7 +130,7 @@ class AgentLoop:
                     # 情况1: LLM 返回 tool_calls，执行 Skills
                     if llm_response.has_tool_calls():
                         # 硬性限制：检查是否已达到最大调用次数
-                        if self.tool_call_count >= self.max_tool_calls:
+                        if tool_call_count >= self.max_tool_calls:
                             logger.warning(f"⚠️ 已达到最大 Skill 调用次数限制 ({self.max_tool_calls})，强制生成最终答案")
                             # 强制要求 LLM 提供最终答案
                             messages.append({
@@ -140,7 +139,7 @@ class AgentLoop:
                             })
                             continue
 
-                        logger.info(f"LLM requested {len(llm_response.tool_calls)} tool calls (当前已调用 {self.tool_call_count}/{self.max_tool_calls})")
+                        logger.info(f"LLM requested {len(llm_response.tool_calls)} tool calls (当前已调用 {tool_call_count}/{self.max_tool_calls})")
 
                         # 添加 assistant 消息（包含 tool_calls）
                         messages.append(self._create_assistant_message_with_tools(llm_response))
@@ -157,8 +156,8 @@ class AgentLoop:
                         # 执行每个 Skill 调用
                         for tool_call in llm_response.tool_calls:
                             # 增加计数
-                            self.tool_call_count += 1
-                            logger.debug(f"Executing: {tool_call.name}({tool_call.arguments}) - 第 {self.tool_call_count} 次调用")
+                            tool_call_count += 1
+                            logger.debug(f"Executing: {tool_call.name} - 第 {tool_call_count} 次调用")
 
                             # Harness Engineering: 验证调用
                             if self.validator:

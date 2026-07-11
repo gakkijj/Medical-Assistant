@@ -17,7 +17,10 @@ class BenchmarkTest(unittest.TestCase):
 
     def test_router_meets_regression_gates(self):
         metrics = evaluate_router(self.cases)
-        self.assertGreaterEqual(metrics["route_accuracy"], 0.85)
+        self.assertGreaterEqual(len(self.cases), 40)
+        self.assertGreaterEqual(metrics["route_accuracy"], 0.90)
+        self.assertGreaterEqual(metrics["route_macro_f1"], 0.90)
+        self.assertGreaterEqual(metrics["primary_agent_accuracy"], 0.90)
         self.assertEqual(metrics["emergency_recall"], 1.0)
 
     def test_saved_prediction_metrics(self):
